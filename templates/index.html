@@ -300,11 +300,11 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
           <span class="tile-row"><span class="tile-no">05</span><i class="fa-solid fa-microphone-lines tile-ico"></i></span>
           <span class="tile-bottom"><span class="tile-title">Speaker Voiceprint Library</span><span class="tile-go">&rarr;</span></span>
         </button>
-        <button class="tile" onclick="switchTab('review')">
+        <button class="tile" id="tile-review" onclick="switchTab('review')">
           <span class="tile-row"><span class="tile-no">06</span><i class="fa-solid fa-clipboard-check tile-ico"></i></span>
           <span class="tile-bottom"><span class="tile-title">Report Review &amp; Sign-Off</span><span class="tile-go">&rarr;</span></span>
         </button>
-        <button class="tile" onclick="switchTab('users')">
+        <button class="tile" id="tile-users" onclick="switchTab('users')">
           <span class="tile-row"><span class="tile-no">07</span><i class="fa-solid fa-users-gear tile-ico"></i></span>
           <span class="tile-bottom"><span class="tile-title">User Management</span><span class="tile-go">&rarr;</span></span>
         </button>
@@ -343,7 +343,7 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
       
       <div class="side-label" style="margin-top:16px">Voiceprint &amp; Quality</div>
       <div class="nav-row"><button class="nav-main tab-btn" id="nav-enrollment" onclick="switchTab('enrollment')"><span class="n">05</span><span>Speaker Voiceprint Library</span></button></div>
-      <div class="nav-row"><button class="nav-main tab-btn" id="nav-review" onclick="switchTab('review')"><span class="n">06</span><span>Report Review &amp; Sign-Off</span></button></div>
+      <div class="nav-row" id="sideNavReview"><button class="nav-main tab-btn" id="nav-review" onclick="switchTab('review')"><span class="n">06</span><span>Report Review &amp; Sign-Off</span></button></div>
 
       <div class="side-label" style="margin-top:16px">Lab Administration</div>
       <div class="nav-row" id="sideNavUsers"><button class="nav-main tab-btn" id="nav-users" onclick="switchTab('users')"><span class="n">07</span><span>User Management</span></button></div>
@@ -1145,6 +1145,19 @@ function showLandingPage() {
 }
 
 function switchTab(tabId) {
+  // RBAC Access Guard
+  const role = (state.currentUser?.role || 'analyst').toLowerCase();
+  const isAdmin = role === 'admin';
+  const isReviewer = role === 'senior_reviewer' || isAdmin;
+  if (tabId === 'review' && !isReviewer) {
+    showToast('Station 06 (Report Review & Sign-Off) requires Senior Reviewer credentials (Four-Eyes Principle).', true);
+    return;
+  }
+  if (tabId === 'users' && !isAdmin) {
+    showToast('Station 07 (User Management) is restricted to Administrators.', true);
+    return;
+  }
+
   state.currentTab = tabId;
   document.getElementById('view-landing').classList.add('hidden');
   document.getElementById('view-app').classList.remove('hidden');
@@ -1214,13 +1227,18 @@ function updateOperatorUI(user) {
   const initials = (user.display_name || user.username).split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   document.getElementById('opAvatar').textContent = initials;
 
-  // Toggle admin/reviewer navigation items based on RBAC
+  // Toggle admin/reviewer navigation items based on RBAC (Four-Eyes Principle)
   const isAdmin = user.role === 'admin';
   const isReviewer = user.role === 'senior_reviewer' || isAdmin;
   const navUsers = document.getElementById('sideNavUsers');
-  const navAudit = document.getElementById('sideNavAudit');
+  const navReview = document.getElementById('sideNavReview');
+  const tileReview = document.getElementById('tile-review');
+  const tileUsers = document.getElementById('tile-users');
+
+  if (navReview) navReview.style.display = isReviewer ? 'block' : 'none';
+  if (tileReview) tileReview.style.display = isReviewer ? 'flex' : 'none';
   if (navUsers) navUsers.style.display = isAdmin ? 'block' : 'none';
-  if (navAudit) navAudit.style.display = isAdmin ? 'block' : 'none';
+  if (tileUsers) tileUsers.style.display = isAdmin ? 'flex' : 'none';
 }
 
 function openLoginModal() { document.getElementById('loginModal').classList.remove('hidden'); }

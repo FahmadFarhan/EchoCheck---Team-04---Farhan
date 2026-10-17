@@ -692,6 +692,9 @@ async def api_delete_speaker(request: Request) -> JSONResponse:
 
 async def api_list_pending_reviews(request: Request) -> JSONResponse:
     user = get_session_user(request)
+    if user["role"] not in ("senior_reviewer", "admin"):
+        return JSONResponse({"error": "Forbidden: Station 06 Report Review requires Senior Reviewer or Admin credentials."}, status_code=403)
+
     cases = db.list_cases_for_user(
         user_id=user["user_id"],
         org_id=user["org_id"],
