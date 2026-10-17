@@ -57,6 +57,10 @@ class DetectionResult:
 
 def get_api_key() -> Optional[str]:
     """Retrieves the DetectifAI API key from environment variables."""
+    try:
+        load_dotenv(override=True)
+    except Exception:
+        pass
     key = os.getenv("DETECTIF_API_KEY")
     if key and key.strip():
         return key.strip()

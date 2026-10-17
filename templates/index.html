@@ -236,6 +236,16 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
 .diag-card { background: var(--paper); border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px; }
 .diag-card small { display: block; font-size: .68rem; color: var(--muted); text-transform: uppercase; font-weight: 700; }
 .diag-card span { font-size: 1rem; font-weight: 700; color: var(--ink); font-family: var(--mono); }
+.future-scope-card {
+  background: #fbfdff; border: 1px dashed #93c5fd; border-radius: 6px; padding: 16px; margin-top: 18px;
+}
+.future-scope-card h4 {
+  font-size: .84rem; font-weight: 800; color: #1e40af; display: flex; align-items: center; gap: 8px;
+  text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px;
+}
+.future-scope-card ul {
+  list-style: disc; padding-left: 20px; font-size: .78rem; color: #3b506d; line-height: 1.6;
+}
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .dot-green { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,0.5); }
 .dot-amber { background: #f59e0b; }
@@ -246,7 +256,6 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
 .scope-item .sc-desc { font-size: .72rem; color: var(--muted); }
 .app-header .op { cursor: pointer; transition: background .15s; border-radius: 6px; padding: 4px 8px; }
 .app-header .op:hover { background: var(--tint); }
-.nav-badge-count { font-size: .68rem; background: var(--red); color: #fff; padding: 2px 6px; border-radius: 10px; font-weight: 700; margin-left: 6px; }
 .role-badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: .68rem; font-weight: 700; text-transform: uppercase; }
 .role-admin { background: #fef2f2; color: #b91c1c; border: 1px solid #fca5a5; }
 .role-analyst { background: #f0fdf4; color: #15803d; border: 1px solid #86efac; }
@@ -295,6 +304,14 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
           <span class="tile-row"><span class="tile-no">06</span><i class="fa-solid fa-clipboard-check tile-ico"></i></span>
           <span class="tile-bottom"><span class="tile-title">Report Review &amp; Sign-Off</span><span class="tile-go">&rarr;</span></span>
         </button>
+        <button class="tile" onclick="switchTab('users')">
+          <span class="tile-row"><span class="tile-no">07</span><i class="fa-solid fa-users-gear tile-ico"></i></span>
+          <span class="tile-bottom"><span class="tile-title">User Management</span><span class="tile-go">&rarr;</span></span>
+        </button>
+        <button class="tile" onclick="switchTab('system')">
+          <span class="tile-row"><span class="tile-no">08</span><i class="fa-solid fa-server tile-ico"></i></span>
+          <span class="tile-bottom"><span class="tile-title">Forensic Systems &amp; API</span><span class="tile-go">&rarr;</span></span>
+        </button>
       </nav>
     </div>
   </section>
@@ -319,19 +336,18 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
   <div class="layout">
     <aside class="side no-print">
       <div class="side-label">Forensic Stations</div>
-      <div class="nav-row"><button class="nav-main tab-btn" id="nav-registration" onclick="switchTab('registration')"><span class="n">01</span><span>Registration &amp; Intake</span></button><button class="nav-next" onclick="goNext('registration')" title="Next step: Audio Upload" aria-label="Next step">&rarr;<small>Next</small></button></div>
-      <div class="nav-row"><button class="nav-main tab-btn" id="nav-audioupload" onclick="switchTab('audioupload')"><span class="n">02</span><span>Audio Upload &amp; Analysis</span></button><button class="nav-next" onclick="goNext('audioupload')" title="Next step: Preliminary Report" aria-label="Next step">&rarr;<small>Next</small></button></div>
-      <div class="nav-row"><button class="nav-main tab-btn" id="nav-report" onclick="switchTab('report')"><span class="n">03</span><span>Preliminary Report</span></button><button class="nav-next" onclick="goNext('report')" title="Next step: Case History" aria-label="Next step">&rarr;<small>Next</small></button></div>
-      <div class="nav-row"><button class="nav-main tab-btn" id="nav-history" onclick="switchTab('history')"><span class="n">04</span><span>Case History &amp; Status</span></button><button class="nav-next" onclick="goNext('history')" title="Start a new case" aria-label="Next step">&rarr;<small>New</small></button></div>
+      <div class="nav-row"><button class="nav-main tab-btn" id="nav-registration" onclick="switchTab('registration')"><span class="n">01</span><span>Registration &amp; Intake</span></button><button class="nav-next" onclick="goNext('registration')" title="Next step: Audio Upload">&rarr;<small>Next</small></button></div>
+      <div class="nav-row"><button class="nav-main tab-btn" id="nav-audioupload" onclick="switchTab('audioupload')"><span class="n">02</span><span>Audio Upload &amp; Analysis</span></button><button class="nav-next" onclick="goNext('audioupload')" title="Next step: Preliminary Report">&rarr;<small>Next</small></button></div>
+      <div class="nav-row"><button class="nav-main tab-btn" id="nav-report" onclick="switchTab('report')"><span class="n">03</span><span>Preliminary Report</span></button><button class="nav-next" onclick="goNext('report')" title="Next step: Case History">&rarr;<small>Next</small></button></div>
+      <div class="nav-row"><button class="nav-main tab-btn" id="nav-history" onclick="switchTab('history')"><span class="n">04</span><span>Case History &amp; Status</span></button><button class="nav-next" onclick="goNext('history')" title="Start a new case">&rarr;<small>New</small></button></div>
       
-      <div class="side-label" style="margin-top:16px">Voiceprint &amp; Review</div>
+      <div class="side-label" style="margin-top:16px">Voiceprint &amp; Quality</div>
       <div class="nav-row"><button class="nav-main tab-btn" id="nav-enrollment" onclick="switchTab('enrollment')"><span class="n">05</span><span>Speaker Voiceprint Library</span></button></div>
       <div class="nav-row"><button class="nav-main tab-btn" id="nav-review" onclick="switchTab('review')"><span class="n">06</span><span>Report Review &amp; Sign-Off</span></button></div>
 
-      <div class="side-label" style="margin-top:16px">Administration &amp; Health</div>
+      <div class="side-label" style="margin-top:16px">Lab Administration</div>
       <div class="nav-row" id="sideNavUsers"><button class="nav-main tab-btn" id="nav-users" onclick="switchTab('users')"><span class="n">07</span><span>User Management</span></button></div>
       <div class="nav-row"><button class="nav-main tab-btn" id="nav-system" onclick="switchTab('system')"><span class="n">08</span><span>Forensic Systems &amp; API</span></button></div>
-      <div class="nav-row" id="sideNavAudit"><button class="nav-main tab-btn" id="nav-orgaudit" onclick="switchTab('orgaudit')"><span class="n">09</span><span>Organisation Audit Log</span></button></div>
 
       <button class="side-home" onclick="showLandingPage()"><i class="fa-solid fa-house"></i>&nbsp; Home</button>
     </aside>
@@ -463,16 +479,8 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
           </div>
         </div>
 
-        <div class="stepbar no-print">
-          <button class="btn ghost" onclick="switchTab('registration')">&larr; Back</button>
-          <span class="mid">Next: Preliminary Report</span>
-          <button class="btn" onclick="goNext('audioupload')">Next Step &rarr;</button>
-        </div>
-      </section>
-
-      
-        <!-- Technical Signal Integrity Diagnostics -->
-        <div class="card" id="signalDiagnosticsCard">
+        <!-- Technical Signal Integrity Diagnostics (Only shown on Step 2 when audio is uploaded) -->
+        <div class="card hidden" id="signalDiagnosticsCard">
           <div class="card-h">
             <div>
               <h3>Section 3 &middot; Deterministic Signal &amp; Container Integrity Inspection</h3>
@@ -492,6 +500,13 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
           </div>
           <p class="tz-note" style="margin-top:10px"><i class="fa-solid fa-circle-info"></i> Signal characteristics provide technical container telemetry but do not constitute standalone proof of editing or judicial admissibility.</p>
         </div>
+
+        <div class="stepbar no-print">
+          <button class="btn ghost" onclick="switchTab('registration')">&larr; Back</button>
+          <span class="mid">Next: Preliminary Report</span>
+          <button class="btn" onclick="goNext('audioupload')">Next Step &rarr;</button>
+        </div>
+      </section>
 
       <!-- ---------- STEP 3 ---------- -->
       <section id="tab-report-content" class="tab-content hidden">
@@ -607,32 +622,29 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
           <span class="mid">Finished? Start another case</span>
           <button class="btn" onclick="goNext('history')">Next Step &middot; New Case &rarr;</button>
         </div>
-      
-      <!-- ---------- STEP 5: SPEAKER VOICEPRINT LIBRARY ---------- -->
+      </section>
+
+      <!-- ---------- STATION 05: SPEAKER VOICEPRINT LIBRARY ---------- -->
       <section id="tab-enrollment-content" class="tab-content hidden">
         <div class="page-head">
-          <div><span class="step">Station 05</span><h2>Eidos Speaker Voiceprint Library</h2><p>Enroll and manage reference biometric voiceprints. Voiceprints can be matched against disputed recordings in Step 2.</p></div>
-          <span class="pill">BIOMETRIC ENROLLMENT</span>
+          <div><span class="step">Station 05</span><h2>Eidos Speaker Voiceprint Library</h2><p>Enroll and manage reference biometric voiceprints for cosine matching against disputed recordings.</p></div>
+          <span class="pill">STATION 05</span>
         </div>
 
         <div class="card">
           <div class="card-h">
-            <div><h3>Enroll Reference Speaker Voiceprint</h3><p>Upload a clean 15&ndash;60s reference recording with at least 10s of clear speech.</p></div>
-            <span class="tag">POST /v1/speakers/enroll</span>
+            <div><h3>Enroll Reference Voiceprint</h3><p>Upload a clean 15&ndash;60s reference recording with at least 10s of speech.</p></div>
+            <span class="tag">Eidos Enrollment</span>
           </div>
           <form id="enrollmentForm" onsubmit="handleSpeakerEnrollment(event)">
             <div class="grid2">
               <div><label class="l">Speaker ID *</label>
-                <input class="in" type="text" id="enrollSpeakerId" placeholder="e.g. spk_marcus_vance_01" required pattern="^[A-Za-z0-9_.:-]{1,64}$">
-                <p class="help">Unique identifier (1-64 alphanumeric, underscore, dot or hyphen).</p></div>
+                <input class="in" type="text" id="enrollSpeakerId" placeholder="e.g. spk_marcus_vance_01" required pattern="^[A-Za-z0-9_.:-]{1,64}$"></div>
               <div><label class="l">Display Name</label>
-                <input class="in" type="text" id="enrollDisplayName" placeholder="e.g. Marcus Vance">
-                <p class="help">Human-readable name for forensic court exhibits.</p></div>
-              <div style="grid-column:1/-1"><label class="l">Provenance &amp; Exemplar Recording Notes</label>
-                <textarea id="enrollNotes" rows="2" class="in" placeholder="e.g. Deposition recording in quiet acoustic environment, studio-grade condenser mic..."></textarea></div>
+                <input class="in" type="text" id="enrollDisplayName" placeholder="e.g. Marcus Vance"></div>
               <div style="grid-column:1/-1">
-                <label class="l">Reference Audio Recording *</label>
-                <label class="dz"><i class="fa-solid fa-microphone-lines"></i><b>Select reference voice recording (WAV, MP3, FLAC)</b>
+                <label class="l">Reference Audio Recording (WAV, MP3, FLAC) *</label>
+                <label class="dz"><i class="fa-solid fa-microphone-lines"></i><b>Select reference voice recording</b>
                   <input type="file" id="enrollAudioInput" accept="audio/*" onchange="previewEnrollmentAudio(this)" class="hidden" required></label>
                 <div id="enrollAudioDetails" class="fbox hidden" style="margin-top:10px">
                   <div class="nm"><span id="enrollFileName">file.wav</span><span id="enrollFileSize" class="mono" style="color:var(--muted)"></span></div>
@@ -649,33 +661,43 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
 
         <div class="card">
           <div class="card-h" style="align-items:center">
-            <div><h3>Enrolled Voiceprint Directory</h3><p class="tz-note">Active voiceprint models available for Eidos biometric matching.</p></div>
+            <div><h3>Enrolled Voiceprint Directory</h3><p class="tz-note">Active voiceprints available for Eidos biometric matching in Step 2.</p></div>
             <button class="btn ghost" onclick="loadEnrolledSpeakers()"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
           </div>
           <div style="overflow-x:auto">
             <table class="t">
-              <thead><tr><th>Speaker ID</th><th>Display Name</th><th>Provenance Notes</th><th>Enrolled Date</th><th>Duration</th><th style="text-align:right">Action</th></tr></thead>
+              <thead><tr><th>Speaker ID</th><th>Display Name</th><th>Enrolled Date</th><th style="text-align:right">Action</th></tr></thead>
               <tbody id="speakersTableBody"></tbody>
             </table>
           </div>
         </div>
+
+        <!-- Future Scope Card for Judges -->
+        <div class="future-scope-card">
+          <h4><i class="fa-solid fa-rocket"></i> Future Scope &amp; Lab Roadmap (For Judges)</h4>
+          <ul>
+            <li><b>Continuous Streaming Enrollment:</b> Multi-channel microphone capture during court depositions with automatic voice segmentation.</li>
+            <li><b>Phonetic &amp; Dialect Adaptation:</b> Multi-lingual acoustic normalisation across regional Indian and international dialects.</li>
+            <li><b>Cryptographic Voiceprint Vault:</b> Zero-knowledge biometric storage preventing voiceprint reconstruction.</li>
+          </ul>
+        </div>
       </section>
 
-      <!-- ---------- STEP 6: REPORT REVIEW & SIGN-OFF ---------- -->
+      <!-- ---------- STATION 06: REPORT REVIEW & SIGN-OFF ---------- -->
       <section id="tab-review-content" class="tab-content hidden">
         <div class="page-head">
-          <div><span class="step">Station 06</span><h2>Report Review &amp; Four-Eyes Quality Assurance</h2><p>Senior Reviewer and Administrative oversight for judicial defensibility. Review findings before court submission.</p></div>
-          <span class="pill">FORENSIC PEER REVIEW</span>
+          <div><span class="step">Station 06</span><h2>Report Review &amp; Four-Eyes Quality Assurance</h2><p>Senior Reviewer and Administrative oversight. Peer review satisfies forensic procedural defensibility.</p></div>
+          <span class="pill">STATION 06</span>
         </div>
 
         <div class="card">
           <div class="card-h">
-            <div><h3>Reports Awaiting Quality Review</h3><p>Cases submitted for peer review verification under the forensic four-eyes principle.</p></div>
-            <span class="tag">Senior Reviewer Clearance</span>
+            <div><h3>Preliminary Reports Awaiting Review</h3><p>Cases awaiting independent senior reviewer evaluation before court submission.</p></div>
+            <span class="tag">Four-Eyes Verification</span>
           </div>
           <div style="overflow-x:auto">
             <table class="t">
-              <thead><tr><th>Case ID</th><th>Title / Reference</th><th>Subject</th><th>Examiner</th><th>Aletheia</th><th>Eidos</th><th>Current Status</th><th style="text-align:right">Review Action</th></tr></thead>
+              <thead><tr><th>Case ID</th><th>Title / Reference</th><th>Subject</th><th>Examiner</th><th>Aletheia Score</th><th>Current Status</th><th style="text-align:right">Action</th></tr></thead>
               <tbody id="reviewTableBody"></tbody>
             </table>
           </div>
@@ -683,41 +705,41 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
 
         <div class="card hidden" id="reviewActionCard">
           <div class="card-h">
-            <div><h3 id="reviewCardTitle">Reviewing Case: EC-XXXX</h3><p>Inspect findings and provide supervisory approval or deficiency rejection remarks.</p></div>
+            <div><h3 id="reviewCardTitle">Reviewing Case</h3><p>Provide supervisory approval or deficiency rejection remarks.</p></div>
             <span class="badge b-warn" id="reviewCardStatus">PENDING REVIEW</span>
           </div>
-          <div class="grid2">
-            <div>
-              <span class="kicker">Case Reference &amp; Subject</span>
-              <p style="font-weight:700;margin-top:4px" id="reviewRefText">-</p>
-              <div style="margin-top:12px">
-                <span class="kicker">Examiner Summary</span>
-                <p style="font-size:.82rem;color:var(--ink2);margin-top:4px" id="reviewSummaryText">-</p>
-              </div>
-            </div>
-            <div>
-              <label class="l">Senior Reviewer Findings &amp; Sign-Off Remarks *</label>
-              <textarea id="reviewRemarks" rows="3" class="in" placeholder="Enter peer-review evaluation, methodology corroboration, or deficiency notes..."></textarea>
-              <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end">
-                <button class="btn dark" style="background:var(--danger)" onclick="submitReportReview('reject')"><i class="fa-solid fa-xmark"></i> Reject Report (Deficiencies)</button>
-                <button class="btn" style="background:var(--ok)" onclick="submitReportReview('approve')"><i class="fa-solid fa-check"></i> Formally Approve Report</button>
-              </div>
+          <div>
+            <label class="l">Senior Reviewer Evaluation Remarks *</label>
+            <textarea id="reviewRemarks" rows="2" class="in" placeholder="Enter peer-review evaluation, methodology corroboration, or deficiency notes..."></textarea>
+            <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end">
+              <button class="btn dark" style="background:var(--danger)" onclick="submitReportReview('reject')"><i class="fa-solid fa-xmark"></i> Reject Report</button>
+              <button class="btn" style="background:var(--ok)" onclick="submitReportReview('approve')"><i class="fa-solid fa-check"></i> Formally Approve Report</button>
             </div>
           </div>
         </div>
+
+        <!-- Future Scope Card for Judges -->
+        <div class="future-scope-card">
+          <h4><i class="fa-solid fa-rocket"></i> Future Scope &amp; Lab Roadmap (For Judges)</h4>
+          <ul>
+            <li><b>PKI Smartcard Digital Signatures:</b> Hardware token e-Sign (Aadhaar / DSC Class-3) embedding cryptographic approval into the PDF.</li>
+            <li><b>Direct Court e-Filing Dispatch:</b> Automated transmission to Judicial Data Grid and CFSL evidence repositories.</li>
+            <li><b>Blind Dual-Examiner Consensus Protocol:</b> Independent simultaneous evaluation where neither examiner sees the other's verdict until submission.</li>
+          </ul>
+        </div>
       </section>
 
-      <!-- ---------- STEP 7: USER MANAGEMENT (ADMIN ONLY) ---------- -->
+      <!-- ---------- STATION 07: USER MANAGEMENT (ADMIN ONLY) ---------- -->
       <section id="tab-users-content" class="tab-content hidden">
         <div class="page-head">
-          <div><span class="step">Station 07</span><h2>User Management &amp; Role-Based Access</h2><p>Manage forensic analysts, senior reviewers, and administrators with PBKDF2-HMAC-SHA256 password hashing.</p></div>
-          <span class="pill">ADMINISTRATOR ONLY</span>
+          <div><span class="step">Station 07</span><h2>User Management &amp; Role-Based Access</h2><p>Provision forensic analysts, senior reviewers, and administrators with PBKDF2-HMAC-SHA256 password hashing.</p></div>
+          <span class="pill">STATION 07 &middot; ADMIN</span>
         </div>
 
         <div class="card">
           <div class="card-h">
-            <div><h3>Create New Authorized Account</h3><p>Provision credentials with cryptographic hashing and role-based permissions.</p></div>
-            <span class="tag">RBAC Management</span>
+            <div><h3>Create Authorized Account</h3><p>Add certified personnel to the forensic laboratory roster.</p></div>
+            <span class="tag">RBAC</span>
           </div>
           <form id="createUserForm" onsubmit="handleCreateUser(event)">
             <div class="grid2">
@@ -742,23 +764,33 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
 
         <div class="card">
           <div class="card-h" style="align-items:center">
-            <div><h3>Active Personnel Directory</h3><p class="tz-note">Personnel authorized to conduct preliminary forensic audio examinations.</p></div>
+            <div><h3>Authorized Laboratory Personnel</h3></div>
             <button class="btn ghost" onclick="loadUsersTable()"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
           </div>
           <div style="overflow-x:auto">
             <table class="t">
-              <thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Status</th><th>Created</th></tr></thead>
+              <thead><tr><th>Username</th><th>Display Name</th><th>Role</th><th>Status</th></tr></thead>
               <tbody id="usersTableBody"></tbody>
             </table>
           </div>
         </div>
+
+        <!-- Future Scope Card for Judges -->
+        <div class="future-scope-card">
+          <h4><i class="fa-solid fa-rocket"></i> Future Scope &amp; Lab Roadmap (For Judges)</h4>
+          <ul>
+            <li><b>Enterprise Single Sign-On (SSO):</b> SAML 2.0 and OpenID Connect integration for police / corporate IdP.</li>
+            <li><b>Hardware MFA Enforcement:</b> WebAuthn / FIDO2 security keys required for evidence modifications.</li>
+            <li><b>Active Directory / LDAP Sync:</b> Centralized role revocation and audit compliance for government forensics labs.</li>
+          </ul>
+        </div>
       </section>
 
-      <!-- ---------- STEP 8: FORENSIC SYSTEMS & API STATUS ---------- -->
+      <!-- ---------- STATION 08: FORENSIC SYSTEMS & API STATUS ---------- -->
       <section id="tab-system-content" class="tab-content hidden">
         <div class="page-head">
-          <div><span class="step">Station 08</span><h2>Forensic Systems &amp; API Infrastructure</h2><p>Inspect neural foundation engine endpoints, latency diagnostics, active scopes, and audit-ready database status.</p></div>
-          <span class="pill">SYSTEM HEALTH</span>
+          <div><span class="step">Station 08</span><h2>Forensic Systems &amp; API Infrastructure</h2><p>DetectifAI neural engine status, latency, authorized scopes, and SQLite case database telemetry.</p></div>
+          <span class="pill">STATION 08</span>
         </div>
 
         <div class="grid2">
@@ -795,37 +827,19 @@ details.schema pre{padding:14px;overflow:auto;max-height:340px;font-family:var(-
               <div class="diag-card"><small>Inconclusive</small><span id="sysInconclusiveCases" style="color:var(--warn)">0</span></div>
               <div class="diag-card"><small>Under Examination</small><span id="sysPendingCases">0</span></div>
             </div>
-            <div class="h4" style="margin-top:16px">Forensic Principles &amp; Governance</div>
-            <div class="fbox" style="margin-top:8px;font-size:.74rem;line-height:1.5">
-              • <b>Chain of Custody:</b> Cryptographic SHA-256 fingerprinting on raw audio.<br>
-              • <b>Non-Admissibility Notice:</b> Preliminary decision support only; not NFSU/CFSL certified.<br>
-              • <b>Model Isolation:</b> Synthetic detection (Aletheia) is tracked independently from biometric match (Eidos).
-            </div>
           </div>
-        </div>
-      </section>
-
-      <!-- ---------- STEP 9: ORGANISATION AUDIT LOG (ADMIN ONLY) ---------- -->
-      <section id="tab-orgaudit-content" class="tab-content hidden">
-        <div class="page-head">
-          <div><span class="step">Station 09</span><h2>Organisation Security &amp; Custody Audit Log</h2><p>Append-only immutable record of all authentication events, case intakes, analysis executions, and administrative modifications.</p></div>
-          <span class="pill">AUDIT TRAIL</span>
         </div>
 
-        <div class="card">
-          <div class="card-h" style="align-items:center">
-            <div><h3>Master Laboratory Audit Trail</h3><p class="tz-note">All events are stamped in UTC and recorded in compliance with chain-of-custody protocols.</p></div>
-            <button class="btn ghost" onclick="loadOrgAuditLog()"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
-          </div>
-          <div style="overflow-x:auto">
-            <table class="t">
-              <thead><tr><th>Timestamp (UTC &middot; Local)</th><th>Action</th><th>Operator / User</th><th>Case / Target</th><th>Outcome</th><th>Details</th></tr></thead>
-              <tbody id="orgAuditTableBody"></tbody>
-            </table>
-          </div>
+        <!-- Future Scope Card for Judges -->
+        <div class="future-scope-card">
+          <h4><i class="fa-solid fa-rocket"></i> Future Scope &amp; Lab Roadmap (For Judges)</h4>
+          <ul>
+            <li><b>Air-Gapped On-Premise Deployment:</b> Local neural inference running on certified secure forensic servers without cloud transmission.</li>
+            <li><b>Hardware GPU Acceleration:</b> TensorRT / ONNX Runtime pipeline processing multi-hour courtroom wiretaps in real time.</li>
+            <li><b>Automated NFSU Benchmark Testing:</b> Daily calibration against gold-standard forensic speech corpora for courtroom evidentiary defensibility.</li>
+          </ul>
         </div>
       </section>
-</section>
     </main>
   </div>
 </div>
