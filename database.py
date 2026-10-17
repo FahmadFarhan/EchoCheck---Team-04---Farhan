@@ -87,6 +87,65 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
         created_at TEXT NOT NULL
     );
 
+    -- RBAC: Organisations
+    CREATE TABLE IF NOT EXISTS organisations (
+        org_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+
+    -- RBAC: Users
+    CREATE TABLE IF NOT EXISTS users (
+        user_id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        display_name TEXT,
+        role TEXT NOT NULL CHECK(role IN ('admin', 'analyst', 'senior_reviewer')),
+        org_id TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (org_id) REFERENCES organisations(org_id)
+    );
+
+    -- RBAC: Case membership (analyst/reviewer assignment)
+    CREATE TABLE IF NOT EXISTS case_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        case_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        assigned_by TEXT,
+        assigned_at TEXT NOT NULL,
+        UNIQUE(case_id, user_id)
+    );
+
+    -- Reports workflow (draft -> submitted -> approved/rejected)
+    CREATE TABLE IF NOT EXISTS reports (
+        report_id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        org_id TEXT NOT NULL,
+        author_user_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft'
+            CHECK(status IN ('draft', 'submitted', 'approved', 'rejected')),
+        reviewer_user_id TEXT,
+        reviewer_comment TEXT,
+        report_version INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+
+    -- Application-wide append-only audit log
+    CREATE TABLE IF NOT EXISTS app_audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT UNIQUE NOT NULL,
+        action TEXT NOT NULL,
+        user_id TEXT,
+        org_id TEXT,
+        case_id TEXT,
+        outcome TEXT NOT NULL DEFAULT 'SUCCESS',
+        metadata_json TEXT,
+        created_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_cases_case_id ON cases(case_id);
     CREATE INDEX IF NOT EXISTS idx_cases_reference ON cases(case_reference);
     CREATE INDEX IF NOT EXISTS idx_cases_verdict ON cases(verdict);
@@ -95,6 +154,15 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
     CREATE INDEX IF NOT EXISTS idx_speakers_speaker_id ON speakers(speaker_id);
     CREATE INDEX IF NOT EXISTS idx_audit_case_id ON case_audit_events(case_id);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON case_audit_events(created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+    CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
+    CREATE INDEX IF NOT EXISTS idx_case_members_case ON case_members(case_id);
+    CREATE INDEX IF NOT EXISTS idx_case_members_user ON case_members(user_id);
+    CREATE INDEX IF NOT EXISTS idx_reports_case ON reports(case_id);
+    CREATE INDEX IF NOT EXISTS idx_app_audit_action ON app_audit_log(action);
+    CREATE INDEX IF NOT EXISTS idx_app_audit_user ON app_audit_log(user_id);
+    CREATE INDEX IF NOT EXISTS idx_app_audit_org ON app_audit_log(org_id);
+    CREATE INDEX IF NOT EXISTS idx_app_audit_created ON app_audit_log(created_at DESC);
     """
     with get_connection(db_path) as conn:
         conn.executescript(schema)
@@ -109,6 +177,8 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
             ("speaker_verify_request_id", "TEXT"),
             ("audio_integrity_json", "TEXT"),
             ("record_type", "TEXT"),
+            ("org_id", "TEXT"),        # RBAC: organisation isolation for cases
+            ("created_by_user_id", "TEXT"),  # RBAC: track who created the case
         ]
         for col_name, col_type in columns_to_add:
             try:
@@ -411,6 +481,35 @@ def update_case_analyst_review(
         return cursor.rowcount > 0
 
 
+def update_case(
+    case_id: str,
+    updates: Dict[str, Any],
+    db_path: str = DEFAULT_DB_PATH,
+) -> bool:
+    """Updates arbitrary fields for a case."""
+    if not updates:
+        return True
+    init_db(db_path)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    fields = []
+    values = []
+    for k, v in updates.items():
+        fields.append(f"{k} = ?")
+        if isinstance(v, (dict, list)):
+            values.append(json.dumps(v))
+        else:
+            values.append(v)
+    fields.append("updated_at = ?")
+    values.append(now_iso)
+    values.append(case_id)
+
+    sql = f"UPDATE cases SET {', '.join(fields)} WHERE case_id = ?;"
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(sql, values)
+        conn.commit()
+        return cursor.rowcount > 0
+
+
 def get_dashboard_stats(db_path: str = DEFAULT_DB_PATH) -> Dict[str, Any]:
     """Computes summary statistics for the dashboard."""
     init_db(db_path)
@@ -490,3 +589,425 @@ def delete_local_speaker(speaker_id: str, db_path: str = DEFAULT_DB_PATH) -> boo
         conn.commit()
         return cursor.rowcount > 0
 
+
+
+# ===========================================================================
+# RBAC: Organisation functions
+# ===========================================================================
+
+def create_organisation(
+    name: str,
+    org_id: Optional[str] = None,
+    db_path: str = DEFAULT_DB_PATH,
+) -> str:
+    """Creates a new organisation. Returns the org_id."""
+    init_db(db_path)
+    oid = org_id or str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO organisations (org_id, name, created_at) VALUES (?, ?, ?);",
+            (oid, name, now),
+        )
+        conn.commit()
+    return oid
+
+
+def get_organisation(org_id: str, db_path: str = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
+    """Retrieves an organisation by org_id."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        row = conn.execute("SELECT * FROM organisations WHERE org_id = ?;", (org_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_organisations(db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+    """Lists all organisations."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute("SELECT * FROM organisations ORDER BY name;").fetchall()
+        return [dict(r) for r in rows]
+
+
+# ===========================================================================
+# RBAC: User functions
+# ===========================================================================
+
+def create_user(
+    username: str,
+    password_hash: str,
+    role: str,
+    org_id: str,
+    display_name: Optional[str] = None,
+    user_id: Optional[str] = None,
+    db_path: str = DEFAULT_DB_PATH,
+) -> str:
+    """Creates a new user account. Returns the user_id."""
+    init_db(db_path)
+    uid = user_id or str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO users (user_id, username, password_hash, display_name, role, org_id, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?);
+            """,
+            (uid, username.strip().lower(), password_hash, display_name, role, org_id, now, now),
+        )
+        conn.commit()
+    return uid
+
+
+def get_user_by_username(username: str, db_path: str = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
+    """Retrieves a user by username (case-insensitive)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE username = ?;",
+            (username.strip().lower(),),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_user_by_id(user_id: str, db_path: str = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
+    """Retrieves a user by user_id."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        row = conn.execute("SELECT * FROM users WHERE user_id = ?;", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_users(org_id: Optional[str] = None, db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+    """Lists users, optionally filtered by org_id."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        if org_id:
+            rows = conn.execute(
+                "SELECT * FROM users WHERE org_id = ? ORDER BY username;",
+                (org_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM users ORDER BY username;").fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_user(
+    user_id: str,
+    display_name: Optional[str] = None,
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    password_hash: Optional[str] = None,
+    db_path: str = DEFAULT_DB_PATH,
+) -> bool:
+    """Updates mutable user fields. Only provided (non-None) fields are changed."""
+    init_db(db_path)
+    now = datetime.now(timezone.utc).isoformat()
+    updates = ["updated_at = ?"]
+    params: List[Any] = [now]
+    if display_name is not None:
+        updates.append("display_name = ?")
+        params.append(display_name)
+    if role is not None:
+        updates.append("role = ?")
+        params.append(role)
+    if is_active is not None:
+        updates.append("is_active = ?")
+        params.append(1 if is_active else 0)
+    if password_hash is not None:
+        updates.append("password_hash = ?")
+        params.append(password_hash)
+    params.append(user_id)
+    sql = f"UPDATE users SET {', '.join(updates)} WHERE user_id = ?;"
+    with get_connection(db_path) as conn:
+        cur = conn.execute(sql, params)
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def user_exists(username: str, db_path: str = DEFAULT_DB_PATH) -> bool:
+    """Returns True if a user with the given username already exists."""
+    return get_user_by_username(username, db_path) is not None
+
+
+# ===========================================================================
+# RBAC: Case membership
+# ===========================================================================
+
+def assign_case_member(
+    case_id: str,
+    user_id: str,
+    assigned_by: Optional[str] = None,
+    db_path: str = DEFAULT_DB_PATH,
+) -> bool:
+    """Assigns a user to a case. Idempotent (ignores duplicates)."""
+    init_db(db_path)
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO case_members (case_id, user_id, assigned_by, assigned_at)
+            VALUES (?, ?, ?, ?);
+            """,
+            (case_id, user_id, assigned_by, now),
+        )
+        conn.commit()
+        return True
+
+
+def remove_case_member(
+    case_id: str,
+    user_id: str,
+    db_path: str = DEFAULT_DB_PATH,
+) -> bool:
+    """Removes a user's assignment from a case."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "DELETE FROM case_members WHERE case_id = ? AND user_id = ?;",
+            (case_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def is_case_member(case_id: str, user_id: str, db_path: str = DEFAULT_DB_PATH) -> bool:
+    """Returns True if the user is assigned to the case."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM case_members WHERE case_id = ? AND user_id = ?;",
+            (case_id, user_id),
+        ).fetchone()
+        return row is not None
+
+
+def get_case_members(case_id: str, db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+    """Returns the list of users assigned to a case (with user details)."""
+    init_db(db_path)
+    sql = """
+        SELECT u.user_id, u.username, u.display_name, u.role,
+               cm.assigned_at, cm.assigned_by
+        FROM case_members cm
+        JOIN users u ON u.user_id = cm.user_id
+        WHERE cm.case_id = ?
+        ORDER BY cm.assigned_at ASC;
+    """
+    with get_connection(db_path) as conn:
+        rows = conn.execute(sql, (case_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_cases_for_user(
+    user_id: str,
+    org_id: str,
+    role: str,
+    verdict: Optional[str] = None,
+    status: Optional[str] = None,
+    search_query: Optional[str] = None,
+    limit: int = 200,
+    db_path: str = DEFAULT_DB_PATH,
+) -> List[Dict[str, Any]]:
+    """
+    Returns cases accessible to a given user, based on their role.
+    - admin: all cases belonging to their org_id
+    - analyst/senior_reviewer: only cases they are assigned to (via case_members),
+      filtered to their org_id for isolation
+    """
+    init_db(db_path)
+    if role == "admin":
+        # Admin sees all org cases.  Also includes cases with NULL org_id
+        # (legacy records created before RBAC was introduced).
+        query_parts = ["SELECT * FROM cases WHERE (org_id = ? OR org_id IS NULL)"]
+        params: List[Any] = [org_id]
+    else:
+        query_parts = [
+            """
+            SELECT c.* FROM cases c
+            JOIN case_members cm ON cm.case_id = c.case_id
+            WHERE cm.user_id = ?
+              AND (c.org_id = ? OR c.org_id IS NULL)
+            """
+        ]
+        params = [user_id, org_id]
+
+    if verdict and verdict != "ALL":
+        query_parts.append("AND verdict = ?")
+        params.append(verdict)
+    if status and status != "ALL":
+        query_parts.append("AND case_status = ?")
+        params.append(status)
+    if search_query and search_query.strip():
+        q = f"%{search_query.strip()}%"
+        query_parts.append(
+            "AND (c.case_id LIKE ? OR c.case_reference LIKE ? OR c.customer_identifier LIKE ? OR c.description LIKE ?)"
+            if role != "admin"
+            else "AND (case_id LIKE ? OR case_reference LIKE ? OR customer_identifier LIKE ? OR description LIKE ?)"
+        )
+        params.extend([q, q, q, q])
+
+    query_parts.append("ORDER BY created_at DESC LIMIT ?")
+    params.append(limit)
+
+    final_query = " ".join(query_parts)
+    with get_connection(db_path) as conn:
+        rows = conn.execute(final_query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ===========================================================================
+# Reports workflow
+# ===========================================================================
+
+def create_report(
+    case_id: str,
+    org_id: str,
+    author_user_id: str,
+    db_path: str = DEFAULT_DB_PATH,
+) -> str:
+    """Creates a new draft report for a case. Returns report_id."""
+    init_db(db_path)
+    report_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO reports (report_id, case_id, org_id, author_user_id, status,
+                                 report_version, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'draft', 1, ?, ?);
+            """,
+            (report_id, case_id, org_id, author_user_id, now, now),
+        )
+        conn.commit()
+    return report_id
+
+
+def get_report(report_id: str, db_path: str = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
+    """Retrieves a report by report_id."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        row = conn.execute("SELECT * FROM reports WHERE report_id = ?;", (report_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def get_reports_for_case(case_id: str, db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+    """Returns all reports for a case, newest first."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM reports WHERE case_id = ? ORDER BY created_at DESC;",
+            (case_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_report_status(
+    report_id: str,
+    new_status: str,
+    reviewer_user_id: Optional[str] = None,
+    reviewer_comment: Optional[str] = None,
+    db_path: str = DEFAULT_DB_PATH,
+) -> bool:
+    """Updates a report's workflow status. Returns True if a row was changed."""
+    init_db(db_path)
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            """
+            UPDATE reports
+            SET status = ?, reviewer_user_id = COALESCE(?, reviewer_user_id),
+                reviewer_comment = COALESCE(?, reviewer_comment),
+                updated_at = ?
+            WHERE report_id = ?;
+            """,
+            (new_status, reviewer_user_id, reviewer_comment, now, report_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def invalidate_report_on_case_update(case_id: str, db_path: str = DEFAULT_DB_PATH) -> int:
+    """
+    Bumps the report_version and resets status to 'draft' for any approved/submitted
+    report on this case (because the underlying case was updated).
+    Returns the number of reports invalidated.
+    """
+    init_db(db_path)
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            """
+            UPDATE reports
+            SET status = 'draft',
+                report_version = report_version + 1,
+                reviewer_user_id = NULL,
+                reviewer_comment = 'Report invalidated: underlying case record was updated.',
+                updated_at = ?
+            WHERE case_id = ? AND status IN ('submitted', 'approved');
+            """,
+            (now, case_id),
+        )
+        conn.commit()
+        return cur.rowcount
+
+
+# ===========================================================================
+# Application-wide audit log
+# ===========================================================================
+
+def log_app_audit_event(
+    action: str,
+    user_id: Optional[str] = None,
+    org_id: Optional[str] = None,
+    case_id: Optional[str] = None,
+    outcome: str = "SUCCESS",
+    metadata: Optional[Dict[str, Any]] = None,
+    db_path: str = DEFAULT_DB_PATH,
+) -> None:
+    """
+    Appends an event to the append-only application audit log.
+    Sensitive values (passwords, API keys) must NEVER be passed in metadata.
+    """
+    try:
+        init_db(db_path)
+        event_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        meta_json = json.dumps(metadata) if metadata else None
+        with get_connection(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO app_audit_log
+                    (event_id, action, user_id, org_id, case_id, outcome, metadata_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (event_id, action, user_id, org_id, case_id, outcome, meta_json, now),
+            )
+            conn.commit()
+    except Exception:
+        pass  # Audit log errors must never crash the application
+
+
+def list_app_audit_events(
+    org_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    action: Optional[str] = None,
+    limit: int = 200,
+    db_path: str = DEFAULT_DB_PATH,
+) -> List[Dict[str, Any]]:
+    """Lists application audit events with optional filters."""
+    init_db(db_path)
+    parts = ["SELECT * FROM app_audit_log WHERE 1=1"]
+    params: List[Any] = []
+    if org_id:
+        parts.append("AND org_id = ?")
+        params.append(org_id)
+    if user_id:
+        parts.append("AND user_id = ?")
+        params.append(user_id)
+    if action:
+        parts.append("AND action = ?")
+        params.append(action)
+    parts.append("ORDER BY created_at DESC LIMIT ?")
+    params.append(limit)
+    with get_connection(db_path) as conn:
+        rows = conn.execute(" ".join(parts), params).fetchall()
+        return [dict(r) for r in rows]

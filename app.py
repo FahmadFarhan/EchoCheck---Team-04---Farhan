@@ -27,6 +27,7 @@ import database as db
 import detectifai as api
 import pdf_report
 import risk_engine as engine
+import auth
 
 # Load environment variables (.env)
 load_dotenv()
@@ -392,6 +393,10 @@ def render_sidebar() -> str:
 
 def page_assessment_station() -> None:
     """Case-entry form, live deepfake detection, Eidos speaker verification, and signal inspection."""
+    if not auth.require_permission("create_case"):
+        return
+    current_user = auth.get_current_user()
+
     st.markdown(
         """
         <div class="sv-header">
@@ -517,6 +522,11 @@ def page_assessment_station() -> None:
 
     # Handle Analysis Execution
     if submit_btn:
+        if not auth.require_permission("upload_audio"):
+            return
+        if not auth.require_permission("run_deepfake_detection"):
+            return
+
         if not case_reference.strip():
             st.error("Please provide a Legal / Matter Case Reference.", icon="🛑")
             return
@@ -542,7 +552,41 @@ def page_assessment_station() -> None:
                     description=description.strip() if description else None,
                     speaker_id=chosen_speaker_id,
                 )
-                st.session_state["latest_case_id"] = analysis_res.case_id
+                case_id = analysis_res.case_id
+                st.session_state["latest_case_id"] = case_id
+
+                # Tag case with org/creator and auto-assign
+                if current_user:
+                    try:
+                        import sqlite3 as _sqlite3
+                        import database as _db
+                        _db.get_connection()("UPDATE cases SET org_id = ?, created_by_user_id = ? WHERE case_id = ?")
+                    except Exception:
+                        pass
+                    # Use direct db call for org/creator update
+                    try:
+                        with db.get_connection() as _conn:
+                            _conn.execute(
+                                "UPDATE cases SET org_id = ?, created_by_user_id = ? WHERE case_id = ?;",
+                                (current_user["org_id"], current_user["user_id"], case_id),
+                            )
+                            _conn.commit()
+                        db.assign_case_member(
+                            case_id=case_id,
+                            user_id=current_user["user_id"],
+                            assigned_by=current_user["user_id"],
+                        )
+                        db.log_app_audit_event(
+                            action="ANALYSIS_RUN",
+                            user_id=current_user["user_id"],
+                            org_id=current_user["org_id"],
+                            case_id=case_id,
+                            outcome="SUCCESS",
+                            metadata={"filename": audio_filename, "case_reference": case_reference.strip()},
+                        )
+                    except Exception:
+                        pass  # Don't fail analysis if tagging fails
+
             except Exception as err:
                 st.error(f"Acoustic analysis pipeline failed: {err}")
 
@@ -566,7 +610,7 @@ def page_assessment_station() -> None:
     latest_case_id = st.session_state.get("latest_case_id")
     if latest_case_id:
         active_case = db.get_case(latest_case_id)
-        if active_case:
+        if active_case and auth.assert_case_access(active_case):
             render_result_panel(active_case)
     else:
         st.markdown(
@@ -1122,14 +1166,31 @@ def render_result_panel(case: dict) -> None:
 
             update_submit = st.form_submit_button("Save Case Update", type="primary")
             if update_submit:
-                db.update_case_analyst_review(
-                    case_id=case["case_id"],
-                    case_status=new_status,
-                    analyst_decision=analyst_decision,
-                    analyst_notes=analyst_notes,
-                )
-                st.success("Case record updated successfully!")
-                st.rerun()
+                if not auth.require_permission("upload_audio", silent=True):
+                    st.error("🚫 Only admins and analysts can update case status.", icon="🚫")
+                else:
+                    db.update_case_analyst_review(
+                        case_id=case["case_id"],
+                        case_status=new_status,
+                        analyst_decision=analyst_decision,
+                        analyst_notes=analyst_notes,
+                    )
+                    # Invalidate any approved/submitted reports since the case changed
+                    db.invalidate_report_on_case_update(case["case_id"])
+                    user = auth.get_current_user()
+                    db.log_app_audit_event(
+                        action="CASE_UPDATED",
+                        user_id=user["user_id"] if user else None,
+                        org_id=user["org_id"] if user else None,
+                        case_id=case["case_id"],
+                        metadata={"new_status": new_status, "analyst_decision": analyst_decision},
+                    )
+                    st.success("Case record updated successfully!")
+                    st.rerun()
+
+    # Report Review Workflow
+    st.markdown("#### 📋 Report Review Workflow")
+    _render_report_workflow(case)
 
     # Report Download & Audit Timeline
     col_dl1, col_dl2 = st.columns([1, 1])
@@ -1190,8 +1251,131 @@ def render_result_panel(case: dict) -> None:
     )
 
 
+def _render_report_workflow(case: dict) -> None:
+    """Renders the report draft/submit/approve/reject workflow for a case."""
+    current_user = auth.get_current_user()
+    if current_user is None:
+        return
+
+    case_id = case["case_id"]
+    org_id = current_user["org_id"]
+    role = current_user["role"]
+    user_id = current_user["user_id"]
+
+    reports = db.get_reports_for_case(case_id)
+
+    can_draft = auth.has_permission(role, "generate_draft_report")
+    can_approve = auth.has_permission(role, "approve_reject_report")
+
+    # Show existing reports
+    if reports:
+        latest = reports[0]
+        status = latest["status"]
+        report_id = latest["report_id"]
+        author_id = latest["author_user_id"]
+        version = latest.get("report_version", 1)
+
+        status_colors = {
+            "draft": "#64748b",
+            "submitted": "#2563eb",
+            "approved": "#15803d",
+            "rejected": "#b91c1c",
+        }
+        st.markdown(
+            f"""
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+                        padding: 0.65rem 0.9rem; margin-bottom: 0.75rem;">
+                <span style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700;
+                             color: {status_colors.get(status, '#64748b')};">
+                    Report v{version}: {status.upper()}
+                </span>
+                <span style="font-size: 0.73rem; color: #64748b; margin-left: 0.5rem;">
+                    ID: <code>{report_id[:8]}…</code>
+                </span>
+                {f'<br/><span style="font-size: 0.73rem; color: #475569;">Reviewer note: {latest["reviewer_comment"]}</span>' if latest.get('reviewer_comment') else ''}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Submit for review (author / admin / analyst)
+        if status == "draft" and can_draft:
+            if st.button("📤 Submit Report for Review", key=f"submit_report_{report_id}"):
+                db.update_report_status(report_id, "submitted")
+                db.log_app_audit_event(
+                    action="REPORT_SUBMITTED",
+                    user_id=user_id, org_id=org_id, case_id=case_id,
+                    metadata={"report_id": report_id},
+                )
+                db.log_case_audit_event(case_id, "REPORT_SUBMITTED", f"Report {report_id} submitted for review by {current_user['username']}.")
+                st.success("Report submitted for review.")
+                st.rerun()
+
+        # Approve / Reject (senior_reviewer only; cannot approve own report)
+        if status == "submitted" and can_approve:
+            if author_id == user_id:
+                st.warning("⚠️ You cannot approve a report you authored.", icon="⚠️")
+            else:
+                col_ap, col_rj = st.columns(2)
+                with col_ap:
+                    if st.button("✅ Approve Report", key=f"approve_{report_id}", type="primary"):
+                        db.update_report_status(report_id, "approved", reviewer_user_id=user_id)
+                        db.log_app_audit_event(
+                            action="REPORT_APPROVED",
+                            user_id=user_id, org_id=org_id, case_id=case_id,
+                            metadata={"report_id": report_id, "reviewer": current_user["username"]},
+                        )
+                        db.log_case_audit_event(case_id, "REPORT_APPROVED", f"Report {report_id} approved by {current_user['username']}.")
+                        st.success("✅ Report approved.")
+                        st.rerun()
+                with col_rj:
+                    with st.expander("Reject with reason"):
+                        with st.form(f"reject_form_{report_id}"):
+                            reject_reason = st.text_area("Rejection Reason *", height=80)
+                            reject_btn = st.form_submit_button("❌ Reject Report", type="secondary")
+                            if reject_btn:
+                                if not reject_reason.strip():
+                                    st.error("A rejection reason is required.", icon="🛑")
+                                else:
+                                    db.update_report_status(
+                                        report_id, "rejected",
+                                        reviewer_user_id=user_id,
+                                        reviewer_comment=reject_reason.strip(),
+                                    )
+                                    db.log_app_audit_event(
+                                        action="REPORT_REJECTED",
+                                        user_id=user_id, org_id=org_id, case_id=case_id,
+                                        metadata={"report_id": report_id, "reason": reject_reason.strip()},
+                                    )
+                                    db.log_case_audit_event(case_id, "REPORT_REJECTED", f"Report {report_id} rejected: {reject_reason.strip()[:80]}")
+                                    st.warning("Report rejected.")
+                                    st.rerun()
+    else:
+        # No reports yet — create a draft
+        if can_draft:
+            if st.button("📝 Create Draft Report", key=f"create_report_{case_id}"):
+                report_id = db.create_report(
+                    case_id=case_id,
+                    org_id=org_id,
+                    author_user_id=user_id,
+                )
+                db.log_app_audit_event(
+                    action="REPORT_CREATED",
+                    user_id=user_id, org_id=org_id, case_id=case_id,
+                    metadata={"report_id": report_id},
+                )
+                db.log_case_audit_event(case_id, "REPORT_CREATED", f"Draft report {report_id} created by {current_user['username']}.")
+                st.success("Draft report created.")
+                st.rerun()
+        else:
+            st.info("No reports exist for this case yet.")
+
+
 def page_speaker_enrollment() -> None:
     """Eidos Speaker Enrollment Station for reference voiceprints."""
+    if not auth.require_permission("enroll_verify_speaker"):
+        return
+    current_user = auth.get_current_user()
     st.markdown(
         """
         <div class="sv-header">
@@ -1300,6 +1484,12 @@ def page_speaker_enrollment() -> None:
                     )
 
                     if res.success:
+                        db.log_app_audit_event(
+                            action="SPEAKER_ENROLLED",
+                            user_id=current_user["user_id"] if current_user else None,
+                            org_id=current_user["org_id"] if current_user else None,
+                            metadata={"speaker_id": speaker_id.strip(), "samples": res.samples_count},
+                        )
                         st.success(f"✅ Speaker '{res.speaker_id}' successfully enrolled in DetectifAI Eidos!")
                         # Save in local database
                         db.save_enrolled_speaker(
@@ -1374,6 +1564,9 @@ def page_speaker_enrollment() -> None:
 
 def page_case_registry() -> None:
     """Historical forensic case registry with filtering, search, and drilldown."""
+    if not auth.require_permission("view_assigned_cases"):
+        return
+    current_user = auth.get_current_user()
     st.markdown(
         """
         <div class="sv-header">
@@ -1422,7 +1615,10 @@ def page_case_registry() -> None:
             placeholder="Search by Case ID, Matter Reference, Speaker, Hash, or Notes...",
         )
 
-    cases = db.list_cases(
+    cases = db.list_cases_for_user(
+        user_id=current_user["user_id"],
+        org_id=current_user["org_id"],
+        role=current_user["role"],
         verdict=filter_verdict,
         status=filter_status,
         search_query=search_query,
@@ -1484,7 +1680,7 @@ def page_case_registry() -> None:
 
     if selected_case_id:
         selected_case = db.get_case(selected_case_id)
-        if selected_case:
+        if selected_case and auth.assert_case_access(selected_case):
             render_result_panel(selected_case)
 
 
@@ -1558,18 +1754,30 @@ def page_system_health() -> None:
             unsafe_allow_html=True,
         )
 
-        st.markdown("### 🔑 Live Session API Key Override")
-        with st.form("override_key_form"):
-            override_key = st.text_input(
-                "DetectifAI API Key",
-                type="password",
-                placeholder="Paste your DetectifAI API key here...",
-            )
-            override_submit = st.form_submit_button("Apply Key to Session")
-            if override_submit and override_key.strip():
-                os.environ["DETECTIF_API_KEY"] = override_key.strip()
-                st.success("API key loaded into process environment!")
-                st.rerun()
+        # API Key override — admin only
+        if auth.has_permission(auth.get_current_user()["role"] if auth.get_current_user() else "analyst", "change_api_config"):
+            st.markdown("### 🔑 Live Session API Key Override")
+            with st.form("override_key_form"):
+                override_key = st.text_input(
+                    "DetectifAI API Key",
+                    type="password",
+                    placeholder="Paste your DetectifAI API key here...",
+                )
+                override_submit = st.form_submit_button("Apply Key to Session")
+                if override_submit and override_key.strip():
+                    os.environ["DETECTIF_API_KEY"] = override_key.strip()
+                    user = auth.get_current_user()
+                    db.log_app_audit_event(
+                        action="API_KEY_CHANGED",
+                        user_id=user["user_id"] if user else None,
+                        org_id=user["org_id"] if user else None,
+                        outcome="SUCCESS",
+                        metadata={"method": "session_override"},
+                    )
+                    st.success("API key loaded into process environment!")
+                    st.rerun()
+        else:
+            st.info("🔒 API key configuration is restricted to administrators.", icon="🔒")
 
     with col2:
         st.markdown("### ⚖️ Legal Forensics Principles & Guardrails")
@@ -1615,8 +1823,214 @@ def page_system_health() -> None:
         )
 
 
+def page_user_management() -> None:
+    """Admin-only user management page."""
+    if not auth.require_permission("manage_users"):
+        return
+    current_user = auth.get_current_user()
+
+    st.markdown(
+        """
+        <div class="sv-header">
+            <div class="sv-header-title"><span>👥</span> User Management</div>
+            <div class="sv-header-subtitle">
+                Create, deactivate and manage user accounts within your organisation.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    users = db.list_users(org_id=current_user["org_id"])
+
+    # --- User table ---
+    st.markdown("### Current Users")
+    if users:
+        df = pd.DataFrame(users)[["username", "display_name", "role", "is_active", "created_at"]].copy()
+        df["is_active"] = df["is_active"].map({1: "Active", 0: "Deactivated"})
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No users found for this organisation.")
+
+    st.markdown("---")
+
+    # --- Deactivate / Reactivate ---
+    st.markdown("### Manage Existing Account")
+    if users:
+        usernames = [u["username"] for u in users if u["user_id"] != current_user["user_id"]]
+        if usernames:
+            selected_username = st.selectbox("Select user to manage", usernames)
+            selected_user = next((u for u in users if u["username"] == selected_username), None)
+            if selected_user:
+                col_a, col_b, col_c = st.columns(3)
+                with col_a:
+                    new_role = st.selectbox(
+                        "Change Role",
+                        ["admin", "analyst", "senior_reviewer"],
+                        index=["admin", "analyst", "senior_reviewer"].index(selected_user["role"]),
+                    )
+                with col_b:
+                    is_active_val = bool(selected_user["is_active"])
+                    deactivate_btn = st.button(
+                        "Deactivate Account" if is_active_val else "Reactivate Account",
+                        type="secondary",
+                    )
+                with col_c:
+                    save_role_btn = st.button("Save Role Change", type="primary")
+
+                if save_role_btn:
+                    db.update_user(selected_user["user_id"], role=new_role)
+                    db.log_app_audit_event(
+                        action="USER_ROLE_CHANGED",
+                        user_id=current_user["user_id"],
+                        org_id=current_user["org_id"],
+                        metadata={"target_user": selected_username, "new_role": new_role},
+                    )
+                    st.success(f"Role updated to '{new_role}' for {selected_username}.")
+                    st.rerun()
+
+                if deactivate_btn:
+                    new_status = not is_active_val
+                    db.update_user(selected_user["user_id"], is_active=new_status)
+                    db.log_app_audit_event(
+                        action="USER_DEACTIVATED" if not new_status else "USER_REACTIVATED",
+                        user_id=current_user["user_id"],
+                        org_id=current_user["org_id"],
+                        metadata={"target_user": selected_username},
+                    )
+                    st.success(f"Account {'deactivated' if not new_status else 'reactivated'} for {selected_username}.")
+                    st.rerun()
+        else:
+            st.info("No other users to manage (you cannot manage your own account here).")
+
+    st.markdown("---")
+
+    # --- Create new user ---
+    st.markdown("### Create New User Account")
+    with st.form("create_user_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            new_username = st.text_input("Username *", placeholder="firstname.lastname")
+            new_display = st.text_input("Display Name", placeholder="Dr. Jane Smith")
+        with col2:
+            new_role = st.selectbox("Role *", ["analyst", "senior_reviewer", "admin"])
+            new_pass = st.text_input("Initial Password *", type="password", placeholder="Minimum 8 characters")
+        create_btn = st.form_submit_button("Create User", type="primary")
+
+        if create_btn:
+            if not new_username.strip() or not new_pass.strip():
+                st.error("Username and password are required.", icon="🛑")
+            elif len(new_pass) < 8:
+                st.error("Password must be at least 8 characters.", icon="🛑")
+            elif db.user_exists(new_username.strip().lower()):
+                st.error(f"Username '{new_username.strip()}' already exists.", icon="🛑")
+            else:
+                from auth import hash_password as _hp
+                pw_hash = _hp(new_pass.strip())
+                uid = db.create_user(
+                    username=new_username.strip(),
+                    password_hash=pw_hash,
+                    role=new_role,
+                    org_id=current_user["org_id"],
+                    display_name=new_display.strip() or None,
+                )
+                db.log_app_audit_event(
+                    action="USER_CREATED",
+                    user_id=current_user["user_id"],
+                    org_id=current_user["org_id"],
+                    metadata={"new_username": new_username.strip(), "role": new_role},
+                )
+                st.success(f"✅ User '{new_username.strip()}' ({new_role}) created successfully.")
+                st.rerun()
+
+
+def page_report_review() -> None:
+    """Senior Reviewer and Admin page to review submitted reports."""
+    current_user = auth.get_current_user()
+    if current_user is None:
+        return
+    if not auth.require_permission("approve_reject_report") and current_user["role"] != "admin":
+        return
+
+    st.markdown(
+        """
+        <div class="sv-header">
+            <div class="sv-header-title"><span>📋</span> Report Review</div>
+            <div class="sv-header-subtitle">
+                Review and approve or reject submitted forensic reports.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # List submitted reports for cases accessible to this user
+    accessible_cases = db.list_cases_for_user(
+        user_id=current_user["user_id"],
+        org_id=current_user["org_id"],
+        role=current_user["role"],
+        limit=500,
+    )
+    case_ids = [c["case_id"] for c in accessible_cases]
+
+    # Gather all submitted reports
+    submitted_reports = []
+    for cid in case_ids:
+        for rpt in db.get_reports_for_case(cid):
+            if rpt["status"] in ("submitted", "approved", "rejected"):
+                case = next((c for c in accessible_cases if c["case_id"] == cid), {})
+                rpt["case_reference"] = case.get("case_reference", cid)
+                submitted_reports.append(rpt)
+
+    if not submitted_reports:
+        st.info("No submitted reports awaiting review for your accessible cases.")
+        return
+
+    for rpt in submitted_reports:
+        status = rpt["status"]
+        icon = {"submitted": "⏳", "approved": "✅", "rejected": "❌"}.get(status, "📋")
+        with st.expander(f"{icon} Report {rpt['report_id'][:8]}… · Case: {rpt['case_reference']} · Status: {status.upper()}"):
+            # Show case details
+            case = db.get_case(rpt["case_id"])
+            if case and auth.assert_case_access(case):
+                render_result_panel(case)
+
+
+def page_org_audit_log() -> None:
+    """Admin-only organisation-wide audit log."""
+    if not auth.require_permission("view_org_audit_log"):
+        return
+    current_user = auth.get_current_user()
+
+    st.markdown(
+        """
+        <div class="sv-header">
+            <div class="sv-header-title"><span>📜</span> Organisation Audit Log</div>
+            <div class="sv-header-subtitle">
+                Append-only record of all security-sensitive actions. Read-only.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    events = db.list_app_audit_events(org_id=current_user["org_id"], limit=300)
+    if not events:
+        st.info("No audit events recorded yet.")
+        return
+
+    df = pd.DataFrame(events)
+    display_cols = [c for c in ["created_at", "action", "user_id", "case_id", "outcome"] if c in df.columns]
+    st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+
+
 def main() -> None:
     """Main routing function."""
+    # ── Authentication gate ──────────────────────────────────────────────────
+    if not auth.require_login():
+        st.stop()  # Do not render anything else until logged in
+        return
+
     selected_page = render_sidebar()
 
     if selected_page == "Evidence Assessment":
@@ -1627,7 +2041,25 @@ def main() -> None:
         page_case_registry()
     elif selected_page == "Forensic Systems & API Status":
         page_system_health()
+    elif selected_page == "User Management":
+        page_user_management()
+    elif selected_page == "Report Review":
+        page_report_review()
+    elif selected_page == "Organisation Audit Log":
+        page_org_audit_log()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        if get_script_run_ctx() is None:
+            # Running directly via python app.py
+            import uvicorn
+            import os
+            port = int(os.getenv("PORT", "8501"))
+            print(f"[EchoCheck AI] Starting Forensic Server on port {port}...")
+            uvicorn.run("server:app", host="0.0.0.0", port=port, reload=False)
+        else:
+            main()
+    except Exception:
+        main()
